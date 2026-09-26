@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "sidebar-laya": {
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "./scripts/run-server.ps1"],
+      "cwd": ".",
+      "tool_timeout_sec": 120
+    }
+  }
+}

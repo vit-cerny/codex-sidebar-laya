@@ -1,0 +1,23 @@
+{
+  "name": "codex-sidebar-laya",
+  "version": "0.1.0",
+  "description": "Local Laya decisions for Codex's built-in browser, with optional Jev API fallback.",
+  "author": {
+    "name": "Vít Černý"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Sidebar Laya",
+    "shortDescription": "Use local Laya to plan next actions in Codex browser tabs.",
+    "longDescription": "Plans the next safe browser action from Codex sidebar DOM state using local Laya. Falls back to Jev's TypeSafe API only when configured, and keeps redacted timing logs.",
+    "developerName": "Vít Černý",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Local"],
+    "defaultPrompt": [
+      "Use Laya to plan a task in the built-in browser.",
+      "Show the latest Laya browser decisions and speeds.",
+      "Use Laya with Jev fallback for this browser task."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
