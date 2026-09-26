@@ -21,7 +21,13 @@ CONFIG_DIR = Path(os.environ.get("USERPROFILE", Path.home())) / ".codex-sidebar-
 CONFIG_PATH = CONFIG_DIR / "config.json"
 LOG_PATH = CONFIG_DIR / "decisions.jsonl"
 MAX_ACTIONS = 12
+MAX_COMPACT_SOURCES = 12
+MAX_COMPACT_TOTAL_CHARS = 20000
 SENSITIVE = re.compile(r"(api[_ -]?key|authorization|bearer|password|token|secret|@)", re.I)
+RESEARCH_SECRET = re.compile(
+    r"(?i)(?:\b(?:sk|rk|ghp|gho|github_pat|xox[baprs]-)[A-Za-z0-9_-]{12,}\b|"
+    r"\b(?:api[_ -]?key|access[_ -]?token|authorization|bearer|password|secret)\s*[:=]\s*[^\s,;]+)"
+)
 
 
 def _config() -> dict:
@@ -85,6 +91,52 @@ def _parse_visible_dom(visible_dom: str) -> list[dict]:
 
 def _safe_host(url: str) -> str:
     return urlparse(url).netloc.lower()[:120]
+
+
+def _redact_research_text(value: str) -> str:
+    return RESEARCH_SECRET.sub("[redacted]", value)
+
+
+def _compact_results(results: list[dict], max_chars_per_source: int = 1200, max_total_chars: int = 12000) -> dict:
+    """Create a bounded extractive packet for a stronger reader model.
+
+    This is intentionally not an LLM summary: it preserves source identity and short excerpts
+    so a later model (for example Luna Medium selected in Codex) can read the packet without
+    receiving five full browser transcripts.
+    """
+    if not isinstance(results, list) or not results:
+        return {"status": "error", "error": "results must contain at least one source"}
+    if len(results) > MAX_COMPACT_SOURCES:
+        return {"status": "error", "error": f"results may contain at most {MAX_COMPACT_SOURCES} sources"}
+    per_source = max(200, min(int(max_chars_per_source), 3000))
+    total_limit = max(1000, min(int(max_total_chars), MAX_COMPACT_TOTAL_CHARS))
+    sections: list[str] = []
+    source_records: list[dict] = []
+    for index, source in enumerate(results, 1):
+        if not isinstance(source, dict):
+            continue
+        title = " ".join(str(source.get("title", "Untitled")).split())[:180]
+        url = _redact_research_text(str(source.get("url", "")).strip()[:500])
+        text = _redact_research_text(" ".join(str(source.get("text", source.get("content", ""))).split()))
+        excerpt = text[:per_source].rstrip()
+        if len(text) > len(excerpt):
+            excerpt += " …[truncated]"
+        source_records.append({"index": index, "title": title, "url": url})
+        sections.append(f"## Source {index}: {title}\nURL: {url}\nExcerpt: {excerpt or '[no visible text returned]'}")
+    packet = "# Laya research packet\n\n" + "\n\n".join(sections)
+    truncated = len(packet) > total_limit
+    if truncated:
+        packet = packet[:total_limit].rstrip() + "\n\n[packet truncated; increase max_total_chars for remaining excerpts]"
+    return {
+        "status": "ok",
+        "reader_model_hint": "Luna Medium",
+        "source_count": len(sections),
+        "sources": source_records,
+        "char_count": len(packet),
+        "truncated": truncated,
+        "packet": packet,
+        "instruction": "Read this extractive packet, compare claims by URL, and cite the sources. It is not an LLM-generated summary.",
+    }
 
 
 def _append_log(entry: dict) -> None:
@@ -203,6 +255,11 @@ def sidebar_laya_plan_tabs(tabs: list[dict], engine: str = "auto") -> str:
     # concurrent GPU inference while still giving callers one multi-tab request.
     results = [plan_one(tab) for tab in tabs]
     return json.dumps({"status": "ok", "count": len(results), "plans": results}, ensure_ascii=False, indent=2)
+
+
+@server.tool(description="Compact bounded text returned from Laya browser research into a source-labeled packet for Luna Medium or another reader model. This does not call an LLM or store the source text.")
+def sidebar_laya_compact_results(results: list[dict], max_chars_per_source: int = 1200, max_total_chars: int = 12000) -> str:
+    return json.dumps(_compact_results(results, max_chars_per_source, max_total_chars), ensure_ascii=False, indent=2)
 
 
 @server.tool(description="Return redacted Laya/Jev decision timing history for display in chat. It never includes page text, typed prompts, credentials, or API keys.")

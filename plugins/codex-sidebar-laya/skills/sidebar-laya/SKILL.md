@@ -27,6 +27,12 @@ re-snapshot after every mutation, and stop any tab that reaches `DONE`, `BLOCKED
 or its step budget. The planner keeps local GPU inference serialized; this prevents corrupted
 Laya decisions while avoiding repeated service setup.
 
+After collecting research text from several tabs, call `sidebar_laya_compact_results` with
+one `{title, url, text}` object per source. Pass its bounded `packet` to the reading model;
+when the user asks for Luna, select Luna Medium in Codex and give it that packet. The compactor
+is extractive and source-preserving, not an LLM summary, so the reader can compare claims and
+cite URLs without receiving the full browser transcripts.
+
 ## Safety
 
 - Do not type or submit secrets, payment data, passwords, verification codes, or personal files.

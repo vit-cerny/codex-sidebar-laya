@@ -38,3 +38,18 @@ def test_parse_visible_dom_accepts_contenteditable_chat_composer():
 def test_plan_rejects_unknown_engine_before_loading_runtime():
     result = module._plan("test", '<button node_id="1" aria-label="Go" />', engine="unknown")
     assert result == {"status": "error", "error": "engine must be auto, laya, or jev"}
+
+
+def test_compact_results_preserves_sources_and_bounds_packet():
+    result = module._compact_results([
+        {"title": "First", "url": "https://reddit.com/a", "text": "alpha " * 500 + " api_key=do-not-share"},
+        {"title": "Second", "url": "https://reddit.com/b", "text": "beta"},
+    ], max_chars_per_source=200, max_total_chars=1000)
+    assert result["status"] == "ok"
+    assert result["reader_model_hint"] == "Luna Medium"
+    assert result["source_count"] == 2
+    assert len(result["packet"]) <= 1000
+    assert "https://reddit.com/a" in result["packet"]
+    assert "https://reddit.com/b" in result["packet"]
+    assert result["sources"][0]["url"] == "https://reddit.com/a"
+    assert "do-not-share" not in result["packet"]

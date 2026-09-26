@@ -23,6 +23,10 @@ engine="auto"  Laya first, then Jev fallback when configured
 Use `sidebar_laya_plan_tabs` for up to eight tabs. It returns one independent plan per tab;
 Codex still executes each action in the matching tab and re-checks safety after every action.
 
+Use `sidebar_laya_compact_results` after multi-tab research. It creates a bounded, source-labeled
+extractive packet for Luna Medium (or another reader model), preserving URLs and short excerpts
+without sending the full browser transcripts to a model or writing them to disk.
+
 The first Laya decision can take about 40 seconds while the model loads. It may also block on complex pages. Treat `DONE` as a claim and verify the displayed result.
 
 Chat composers implemented as `contenteditable` elements (including Gemini's prompt box)
