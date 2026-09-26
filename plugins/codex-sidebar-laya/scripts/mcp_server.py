@@ -36,7 +36,7 @@ def _browseruse_root() -> Path:
     return Path(configured) if configured else Path.home() / "Documents" / "browseruse"
 
 
-def _load_runtime() -> tuple[object, object, object]:
+def _load_runtime() -> tuple[object, object, object, object]:
     root = _browseruse_root()
     if not (root / "jev_ultrafast" / "model.py").exists():
         raise RuntimeError("Jev/Laya runtime not found. Run install.ps1 with -BrowserUseRoot.")
@@ -44,11 +44,11 @@ def _load_runtime() -> tuple[object, object, object]:
     if root_text not in sys.path:
         sys.path.insert(0, root_text)
     from jev_config import load_env  # type: ignore
-    from jev_ultrafast.model import choose_laya, choose_typesafe  # type: ignore
+    from jev_ultrafast.model import choose, choose_laya, choose_typesafe  # type: ignore
     from jev_security import redact  # type: ignore
 
     load_env()
-    return choose_laya, choose_typesafe, redact
+    return choose, choose_laya, choose_typesafe, redact
 
 
 def _attribute(line: str, name: str) -> str:
@@ -73,7 +73,8 @@ def _parse_visible_dom(visible_dom: str) -> list[dict]:
         if SENSITIVE.search(label) or SENSITIVE.search(value):
             continue
         input_type = _attribute(line, "type").lower()
-        if tag in {"input", "textarea"} and input_type not in {"password", "hidden", "file", "checkbox", "radio", "submit", "button"}:
+        contenteditable = _attribute(line, "contenteditable").lower() == "true"
+        if (tag in {"input", "textarea"} and input_type not in {"password", "hidden", "file", "checkbox", "radio", "submit", "button"}) or contenteditable:
             actions.append({"id": f"{node}-fill", "node": node, "kind": "fill", "role": role,
                             "label": label, "value": value})
         elif tag in {"button", "a", "select"} or role in {"button", "link", "combobox", "menuitem", "tab"}:
@@ -92,9 +93,12 @@ def _append_log(entry: dict) -> None:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str = "") -> dict:
+def _plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str = "", engine: str = "auto") -> dict:
     if not goal.strip():
         return {"status": "error", "error": "goal is required"}
+    requested_engine = engine.lower().strip()
+    if requested_engine not in {"auto", "laya", "jev"}:
+        return {"status": "error", "error": "engine must be auto, laya, or jev"}
     actions = _parse_visible_dom(visible_dom)
     if not actions:
         return {"status": "blocked", "error": "no safe interactive elements in the supplied sidebar DOM"}
@@ -104,15 +108,25 @@ def _plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str
     fallback = False
     reason = ""
     try:
-        choose_laya, choose_typesafe, redact = _load_runtime()
-        decision = choose_laya(state, goal, [])
-        engine = "laya"
+        choose, choose_laya, choose_typesafe, redact = _load_runtime()
+        if requested_engine == "jev":
+            decision, decided_engine = choose_typesafe(state, goal, []), "jev-typesafe"
+        elif requested_engine == "laya":
+            decision, decided_engine = choose_laya(state, goal, []), "laya"
+        else:
+            # The runtime's chooser includes the configured latency/VRAM fallback.
+            decision = choose(state, goal, [])
+            decided_engine = "laya" if str(decision.get("model", "")).startswith("laya/") else "jev"
+        engine = decided_engine
         laya_refused = decision.get("operation") == "BLOCKED"
         # Laya is known to produce false DONE responses when it cannot reason over the
         # action set. If actionable controls remain, ask the Jev provider to verify it.
         laya_unverified_done = decision.get("operation") == "DONE" and bool(actions)
-        if (laya_refused or laya_unverified_done) and os.environ.get("TYPESAFE_API_KEY"):
+        slow_laya = engine == "laya" and decision.get("latency_ms", 0) > int(os.environ.get("SIDEBAR_LAYA_MAX_MS", "5000"))
+        if requested_engine == "auto" and engine == "laya" and (laya_refused or laya_unverified_done or slow_laya) and os.environ.get("TYPESAFE_API_KEY"):
             fallback, reason = True, "laya_blocked" if laya_refused else "laya_unverified_done"
+            if slow_laya:
+                reason = "laya_slow"
             decision, engine = choose_typesafe(state, goal, []), "jev-typesafe"
         elif laya_unverified_done:
             return {
@@ -125,9 +139,9 @@ def _plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str
     except Exception as error:
         safe_error = str(error)
         try:
-            choose_laya, choose_typesafe, redact = _load_runtime()
+            choose, choose_laya, choose_typesafe, redact = _load_runtime()
             safe_error = redact(safe_error)
-            if os.environ.get("TYPESAFE_API_KEY"):
+            if requested_engine == "auto" and os.environ.get("TYPESAFE_API_KEY"):
                 fallback, reason = True, "laya_error"
                 decision, engine = choose_typesafe(state, goal, []), "jev-typesafe"
             else:
@@ -149,7 +163,7 @@ def _plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str
         "confidence": decision.get("confidence"),
         "latency_ms": decision.get("latency_ms", round((time.perf_counter() - started) * 1000)),
         "requires_text": bool(action and action.get("kind") == "fill"),
-        "note": "This is a plan only. Execute node_id through Codex Browser after normal safety checks.",
+        "note": "Plan only. Execute node_id through Codex Browser after normal safety checks. Select Luna Medium in Codex for difficult drafting; this service cannot change Codex's model picker.",
     }
     _append_log({
         "at": datetime.now(UTC).isoformat(), "host": _safe_host(url), "engine": engine,
@@ -171,9 +185,24 @@ server = MCPServer(
 )
 
 
-@server.tool(description="Plan one safe next action for the built-in Codex browser. Pass the exact visible DOM from dom_cua. The returned node_id must be executed only through the Codex Browser skill.")
-def sidebar_laya_plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str = "") -> str:
-    return json.dumps(_plan(goal, visible_dom, url, title, text), ensure_ascii=False, indent=2)
+@server.tool(description="Plan one safe next action for the built-in Codex browser. engine=auto uses Laya then configured Jev fallback; engine=laya stays local; engine=jev uses Jev TypeSafe. Pass the exact visible DOM from dom_cua. The returned node_id must be executed only through the Codex Browser skill.")
+def sidebar_laya_plan(goal: str, visible_dom: str, url: str = "", title: str = "", text: str = "", engine: str = "auto") -> str:
+    return json.dumps(_plan(goal, visible_dom, url, title, text, engine), ensure_ascii=False, indent=2)
+
+
+@server.tool(description="Plan one safe action for each of several Codex sidebar tabs. Pass independent visible DOM snapshots; the service never clicks or types and caps work at eight tabs.")
+def sidebar_laya_plan_tabs(tabs: list[dict], engine: str = "auto") -> str:
+    if not tabs or len(tabs) > 8:
+        return json.dumps({"status": "error", "error": "tabs must contain 1 to 8 tab states"})
+    def plan_one(tab: dict) -> dict:
+        return _plan(
+            str(tab.get("goal", "")), str(tab.get("visible_dom", "")),
+            str(tab.get("url", "")), str(tab.get("title", "")), str(tab.get("text", "")), engine,
+        )
+    # Laya's model is a process-local singleton; keep decisions serialized to avoid unsafe
+    # concurrent GPU inference while still giving callers one multi-tab request.
+    results = [plan_one(tab) for tab in tabs]
+    return json.dumps({"status": "ok", "count": len(results), "plans": results}, ensure_ascii=False, indent=2)
 
 
 @server.tool(description="Return redacted Laya/Jev decision timing history for display in chat. It never includes page text, typed prompts, credentials, or API keys.")

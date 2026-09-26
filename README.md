@@ -12,7 +12,23 @@ This is deliberately a planner, not a replacement browser driver. It cannot acce
 4. If Laya blocks/errors and the existing Jev runtime has `TYPESAFE_API_KEY`, the planner uses Jev's TypeSafe API for that decision only.
 5. A redacted JSONL log records decision, engine, fallback, confidence, and elapsed time.
 
+Choose the decision engine per call:
+
+```text
+engine="laya"  local-only
+engine="jev"   Jev TypeSafe only (requires the existing key)
+engine="auto"  Laya first, then Jev fallback when configured
+```
+
+Use `sidebar_laya_plan_tabs` for up to eight tabs. It returns one independent plan per tab;
+Codex still executes each action in the matching tab and re-checks safety after every action.
+
 The first Laya decision can take about 40 seconds while the model loads. It may also block on complex pages. Treat `DONE` as a claim and verify the displayed result.
+
+Chat composers implemented as `contenteditable` elements (including Gemini's prompt box)
+are supported. Laya still does not see pixels or screenshots: it chooses from the DOM that
+Codex supplies. Codex opens URLs and performs the browser action. For difficult drafting,
+choose Luna Medium in Codex; this plugin does not silently switch Codex models.
 
 ## Prerequisites
 

@@ -24,3 +24,17 @@ def test_parse_visible_dom_extracts_safe_actions():
 def test_parse_visible_dom_caps_action_count():
     dom = '\n'.join(f'<button node_id={index} aria-label="Action {index}">x</button>' for index in range(20))
     assert len(module._parse_visible_dom(dom)) == module.MAX_ACTIONS
+
+
+def test_parse_visible_dom_accepts_contenteditable_chat_composer():
+    dom = '<div node_id="28" aria-label="Enter a prompt for Gemini" contenteditable="true" role="textbox" />'
+    actions = module._parse_visible_dom(dom)
+    assert actions == [{
+        "id": "28-fill", "node": "28", "kind": "fill", "role": "textbox",
+        "label": "Enter a prompt for Gemini", "value": "",
+    }]
+
+
+def test_plan_rejects_unknown_engine_before_loading_runtime():
+    result = module._plan("test", '<button node_id="1" aria-label="Go" />', engine="unknown")
+    assert result == {"status": "error", "error": "engine must be auto, laya, or jev"}

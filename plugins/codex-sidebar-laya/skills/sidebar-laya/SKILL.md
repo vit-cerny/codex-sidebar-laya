@@ -12,19 +12,31 @@ The `sidebar_laya_plan` MCP tool is a planner only. It receives the current visi
 ## Required workflow
 
 1. Use the Codex in-app Browser skill and obtain the active tab's visible DOM with `tab.dom_cua.get_visible_dom()`.
-2. Call `sidebar_laya_plan` with the user goal, exact DOM string, current URL, title, and only the short visible text needed for completion checking.
+2. Call `sidebar_laya_plan` with the user goal, exact DOM string, current URL, title, and only the short visible text needed for completion checking. Set `engine="laya"` for local-only, `engine="jev"` for Jev TypeSafe, or leave `engine="auto"` for Laya with configured fallback.
 3. Report the chosen engine and timing briefly in commentary.
 4. Execute only the returned `node_id` with the Codex Browser skill:
    - `CLICK` -> `tab.dom_cua.click({ node_id })`
-   - `TYPE_TEXT` -> first click the node, then type user-authorized text.
+   - `TYPE_TEXT`/`fill` -> first click the node, then type user-authorized text. This includes
+     `contenteditable` chat composers such as Google Gemini's prompt box.
 5. Re-observe the DOM after every action and make a new plan. Never repeat a browser mutation.
 6. Stop at `DONE`, `BLOCKED`, an error, or the user's maximum requested number of steps.
+
+For multiple tabs, collect one fresh DOM snapshot per tab and call `sidebar_laya_plan_tabs`
+with at most eight independent tab states. Execute each returned plan in its matching tab,
+re-snapshot after every mutation, and stop any tab that reaches `DONE`, `BLOCKED`, an error,
+or its step budget. The planner keeps local GPU inference serialized; this prevents corrupted
+Laya decisions while avoiding repeated service setup.
 
 ## Safety
 
 - Do not type or submit secrets, payment data, passwords, verification codes, or personal files.
 - Ask immediately before a final form submission, sending a message, purchasing, uploading, changing access, or accepting browser permissions unless the user's initial request explicitly authorizes that exact action and destination.
 - A plan is not proof of success. Confirm the outcome from the visible page.
+- Laya receives the visible DOM/action summary, not screenshots or pixels. It has no vision
+  capability in this bridge. Codex must open/navigate the tab and execute the returned action;
+  Laya only chooses the next operation and target.
+- For difficult text generation, select Luna Medium in Codex before asking the agent to draft
+  text. This plugin cannot change Codex's model picker and never invents field values.
 - If Laya errors or blocks and `TYPESAFE_API_KEY` is configured in the Jev runtime environment, the MCP server automatically asks Jev's TypeSafe decision API for a replacement plan. It never returns the key.
 
 ## Logs
